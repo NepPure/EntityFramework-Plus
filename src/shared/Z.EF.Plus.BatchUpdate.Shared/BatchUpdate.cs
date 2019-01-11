@@ -665,6 +665,7 @@ SELECT  @totalRowAffected
             bool isMySql = false;
             bool isMySqlPomelo = false;
             bool isSQLite = false;
+            bool isOracle = false;
 
             if (assemblyName == "Microsoft.EntityFrameworkCore.SqlServer")
             {
@@ -702,6 +703,13 @@ SELECT  @totalRowAffected
                 dynamicProviderEntityType = typeof(RelationalMetadataExtensions).GetMethod("Relational", new[] { typeof(IEntityType) });
                 dynamicProviderProperty = typeof(RelationalMetadataExtensions).GetMethod("Relational", new[] { typeof(IProperty) });
             }
+            else if (assemblyName == "Oracle.EntityFrameworkCore")
+            {
+                isOracle = true;
+                var type = assembly.GetType("Microsoft.EntityFrameworkCore.OracleMetadataExtensions");
+                dynamicProviderEntityType = type.GetMethod("Oracle", new[] { typeof(IEntityType) });
+                dynamicProviderProperty = type.GetMethod("Oracle", new[] { typeof(IProperty) });
+            }
             else
             {
                 throw new Exception(string.Format(ExceptionMessage.Unsupported_Provider, assemblyName));
@@ -713,7 +721,7 @@ SELECT  @totalRowAffected
 
             if (isSqlServer)
             {
-                var sqlServer = (IRelationalEntityTypeAnnotations)dynamicProviderEntityType.Invoke(null, new[] {entity});
+                var sqlServer = (IRelationalEntityTypeAnnotations)dynamicProviderEntityType.Invoke(null, new[] { entity });
 
                 // GET mapping
                 tableName = string.IsNullOrEmpty(sqlServer.Schema) ? string.Concat("[", sqlServer.TableName, "]") : string.Concat("[", sqlServer.Schema, "].[", sqlServer.TableName, "]");
@@ -722,10 +730,10 @@ SELECT  @totalRowAffected
                 var columnKeys = new List<string>();
                 foreach (var propertyKey in entity.GetKeys().ToList()[0].Properties)
                 {
-                    var mappingProperty = dynamicProviderProperty.Invoke(null, new[] {propertyKey});
+                    var mappingProperty = dynamicProviderProperty.Invoke(null, new[] { propertyKey });
 
                     var columnNameProperty = mappingProperty.GetType().GetProperty("ColumnName", BindingFlags.Public | BindingFlags.Instance);
-                    columnKeys.Add((string) columnNameProperty.GetValue(mappingProperty));
+                    columnKeys.Add((string)columnNameProperty.GetValue(mappingProperty));
                 }
 
                 // GET primary key join
@@ -733,7 +741,7 @@ SELECT  @totalRowAffected
             }
             else if (isPostgreSQL)
             {
-                var sqlServer = (IRelationalEntityTypeAnnotations)dynamicProviderEntityType.Invoke(null, new[] {entity});
+                var sqlServer = (IRelationalEntityTypeAnnotations)dynamicProviderEntityType.Invoke(null, new[] { entity });
 
                 // GET mapping
                 tableName = string.IsNullOrEmpty(sqlServer.Schema) ? string.Concat("\"", sqlServer.TableName, "\"") : string.Concat("\"", sqlServer.Schema, "\".\"", sqlServer.TableName, "\"");
@@ -742,10 +750,10 @@ SELECT  @totalRowAffected
                 var columnKeys = new List<string>();
                 foreach (var propertyKey in entity.GetKeys().ToList()[0].Properties)
                 {
-                    var mappingProperty = dynamicProviderProperty.Invoke(null, new[] {propertyKey});
+                    var mappingProperty = dynamicProviderProperty.Invoke(null, new[] { propertyKey });
 
                     var columnNameProperty = mappingProperty.GetType().GetProperty("ColumnName", BindingFlags.Public | BindingFlags.Instance);
-                    columnKeys.Add((string) columnNameProperty.GetValue(mappingProperty));
+                    columnKeys.Add((string)columnNameProperty.GetValue(mappingProperty));
                 }
 
                 // GET primary key join
@@ -829,6 +837,26 @@ SELECT  @totalRowAffected
                 // GET primary key join
                 primaryKeys = string.Join(Environment.NewLine + "AND ", columnKeys.Select(x => string.Concat(tableName + ".\"", x, "\" = B.\"", x, "\"")));
             }
+            else if (isOracle)
+            {
+                var sqlServer = (IRelationalEntityTypeAnnotations)dynamicProviderEntityType.Invoke(null, new[] { entity });
+
+                // GET mapping
+                tableName = string.IsNullOrEmpty(sqlServer.Schema) ? string.Concat("\"", sqlServer.TableName, "\"") : string.Concat("\"", sqlServer.Schema, "\".\"", sqlServer.TableName, "\"");
+
+                // GET keys mappings
+                var columnKeys = new List<string>();
+                foreach (var propertyKey in entity.GetKeys().ToList()[0].Properties)
+                {
+                    var mappingProperty = dynamicProviderProperty.Invoke(null, new[] { propertyKey });
+
+                    var columnNameProperty = mappingProperty.GetType().GetProperty("ColumnName", BindingFlags.Public | BindingFlags.Instance);
+                    columnKeys.Add((string)columnNameProperty.GetValue(mappingProperty));
+                }
+
+                // GET primary key join
+                primaryKeys = string.Join(Environment.NewLine + "AND ", columnKeys.Select(x => string.Concat(tableName + ".\"", x, "\" = B.\"", x, "\"")));
+            }
 
             // GET command text template
             var commandTextTemplate =
@@ -838,7 +866,8 @@ SELECT  @totalRowAffected
                 CommandTextWhileDelayTemplate :
                 CommandTextWhileTemplate :
 #endif
-                isPostgreSQL? CommandTextTemplate_PostgreSQL : 
+                isOracle ? CommandTextOracleTemplate :
+                isPostgreSQL ? CommandTextTemplate_PostgreSQL :
                 isMySql || isMySqlPomelo ?
                 CommandTextTemplate_MySQL :
                 isSQLite ?
@@ -861,7 +890,7 @@ SELECT  @totalRowAffected
 
             if (isSqlServer)
             {
-                setValues = string.Join("," + Environment.NewLine, values.Select((x, i) => x.Item2 is ConstantExpression ? string.Concat("A.[", x.Item1, "] = ", ((ConstantExpression) x.Item2).Value) : string.Concat("A.[", x.Item1, "] = @zzz_BatchUpdate_", i)));
+                setValues = string.Join("," + Environment.NewLine, values.Select((x, i) => x.Item2 is ConstantExpression ? string.Concat("A.[", x.Item1, "] = ", ((ConstantExpression)x.Item2).Value) : string.Concat("A.[", x.Item1, "] = @zzz_BatchUpdate_", i)));
             }
             else if (isPostgreSQL)
             {
@@ -872,6 +901,10 @@ SELECT  @totalRowAffected
                 setValues = string.Join("," + Environment.NewLine, values.Select((x, i) => x.Item2 is ConstantExpression ? string.Concat("A.`", x.Item1, "` = ", ((ConstantExpression)x.Item2).Value) : string.Concat("A.`", x.Item1, "` = @zzz_BatchUpdate_", i)));
             }
             else if (isSQLite)
+            {
+                setValues = string.Join("," + Environment.NewLine, values.Select((x, i) => x.Item2 is ConstantExpression ? string.Concat("\"", x.Item1, "\" = ", ((ConstantExpression)x.Item2).Value) : string.Concat("\"", x.Item1, "\" = @zzz_BatchUpdate_", i)));
+            }
+            else if (isOracle)
             {
                 setValues = string.Join("," + Environment.NewLine, values.Select((x, i) => x.Item2 is ConstantExpression ? string.Concat("\"", x.Item1, "\" = ", ((ConstantExpression)x.Item2).Value) : string.Concat("\"", x.Item1, "\" = @zzz_BatchUpdate_", i)));
             }
@@ -980,6 +1013,7 @@ SELECT  @totalRowAffected
             bool isMySql = false;
             bool isMySqlPomelo = false;
             bool isSQLite = false;
+            bool isOracle = false;
 
             if (assemblyName == "Microsoft.EntityFrameworkCore.SqlServer")
             {
@@ -1016,6 +1050,13 @@ SELECT  @totalRowAffected
                 // CHANGE all for this one?
                 dynamicProviderEntityType = typeof(RelationalMetadataExtensions).GetMethod("Relational", new[] { typeof(IEntityType) });
                 dynamicProviderProperty = typeof(RelationalMetadataExtensions).GetMethod("Relational", new[] { typeof(IProperty) });
+            }
+            else if (assemblyName == "Oracle.EntityFrameworkCore")
+            {
+                isOracle = true;
+                var type = assembly.GetType("Microsoft.EntityFrameworkCore.OracleMetadataExtensions");
+                dynamicProviderEntityType = type.GetMethod("Oracle", new[] { typeof(IEntityType) });
+                dynamicProviderProperty = type.GetMethod("Oracle", new[] { typeof(IProperty) });
             }
             else
             {
@@ -1168,7 +1209,7 @@ SELECT  @totalRowAffected
 #elif EFCORE
                     RelationalQueryContext queryContext;
                     var command = ((IQueryable)result).CreateCommand(out queryContext);
-                    var commandText = command.CommandText; 
+                    var commandText = command.CommandText;
 #if NETSTANDARD1_3
                     // GET the 'value' part
                     var pos = commandText.IndexOf("AS [value]" + Environment.NewLine + "FROM", StringComparison.CurrentCultureIgnoreCase) != -1 ?
@@ -1199,14 +1240,14 @@ SELECT  @totalRowAffected
                     valueSql = valueSql.Replace("[x]", "B");
                     valueSql = valueSql.Replace("[c]", "B");
 
-                    if (valueSql.Length > 0 
+                    if (valueSql.Length > 0
                         && valueSql[0] == '['
                         && valueSql.IndexOf("]", StringComparison.CurrentCultureIgnoreCase) != -1
                         && valueSql.IndexOf("]", StringComparison.CurrentCultureIgnoreCase) == valueSql.IndexOf("].[", StringComparison.CurrentCultureIgnoreCase)
                         )
                     {
                         // Could contains [something].[column]
-                        
+
                         // GET the tag
                         var tagToReplace = valueSql.Substring(0, valueSql.IndexOf("]", StringComparison.CurrentCultureIgnoreCase) + 1);
                         valueSql = valueSql.Replace(tagToReplace, "B");
