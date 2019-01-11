@@ -609,7 +609,7 @@ string.Concat("\"", store.Schema, "\".\"", store.Table, "\"");
             else if (assemblyName == "Oracle.EntityFrameworkCore")
             {
                 isOracle = true;
-                var type = assembly.GetType("Oracle.EntityFrameworkCore.OracleMetadataExtensions");
+                var type = assembly.GetType("Microsoft.EntityFrameworkCore.OracleMetadataExtensions");
                 dynamicProviderEntityType = type.GetMethod("Oracle", new[] { typeof(IEntityType) });
                 dynamicProviderProperty = type.GetMethod("Oracle", new[] { typeof(IProperty) });
             }
